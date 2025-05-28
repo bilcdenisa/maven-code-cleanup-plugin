@@ -1,4 +1,4 @@
-package com.example.cleanup;
+package com.example;
 
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ast.body.MethodDeclaration;
@@ -15,24 +15,25 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static java.nio.file.Files.readAllBytes;
-import static java.util.regex.Pattern.MULTILINE;
-import static java.util.regex.Pattern.compile;
+import static java.util.regex.Pattern.*;
 
 @Mojo(name = "cleanup")
 public class CodeCleanupMojo extends AbstractMojo {
     @Parameter(defaultValue = "${project.basedir}/src", property = "sourceDir")
     private File sourceDir;
-    @Parameter(defaultValue = "true", property = "checkUnusedImports")
+    @Parameter(defaultValue = "false", property = "checkUnusedImports")
     private boolean checkUnusedImports;
-    @Parameter(property = "maxLineLength", defaultValue = "-1")
+    @Parameter(defaultValue = "-1", property = "maxLineLength")
     private int maxLineLength;
-    @Parameter(defaultValue = "true", property = "checkNewLineAtEnd")
+    @Parameter(defaultValue = "false", property = "checkNewLineAtEnd")
     private boolean checkNewLineAtEnd;
-    @Parameter(defaultValue = "true", property = "checkTODOs")
+    @Parameter(defaultValue = "false", property = "checkTODOs")
     private boolean checkTODOs;
     @Parameter(defaultValue = "-1", property = "maxMethodParameters")
     private int maxMethodParameters;
@@ -71,24 +72,23 @@ public class CodeCleanupMojo extends AbstractMojo {
         try {
             var lines = Files.readAllLines(file);
             if (checkNewLineAtEnd) {
-                getLog().warn("Missing newline at end of file: " + file);
                 violationsFound = !hasNewlineAtEOF(file);
             }
 
             if (maxLineLength != -1) {
-                violationsFound = violationsFound || hasMaxLineLengthExceeded(lines, file);
+                violationsFound = violationsFound | hasMaxLineLengthExceeded(lines, file);
             }
 
             if (checkTODOs) {
-                violationsFound = violationsFound || hasToDoComments(lines, file);
+                violationsFound = violationsFound | hasToDoComments(lines, file);
             }
 
             if (maxMethodParameters != -1) {
-                violationsFound = violationsFound || hasMaxParamsExceeded(lines, file);
+                violationsFound = violationsFound | hasMaxParamsExceeded(lines, file);
             }
 
             if (checkUnusedImports) {
-                violationsFound = hasUnusedImports(file);
+                violationsFound = violationsFound | hasUnusedImports(file);
             }
         } catch (IOException e) {
             getLog().error("Error processing file: " + file, e);
@@ -126,8 +126,9 @@ public class CodeCleanupMojo extends AbstractMojo {
 
     private boolean hasToDoComments(List<String> lines, Path file) {
         var violationsFound = false;
+        var pattern = Pattern.compile("\\bT\\s*O\\s*D\\s*O\\b", Pattern.CASE_INSENSITIVE);
         for (var i = 0; i < lines.size(); i++) {
-            if (lines.get(i).contains("TODO")) {
+            if (pattern.matcher(lines.get(i)).find()) {
                 getLog().warn("TODO found in file: " + file + " at line " + (i + 1) + ": " + lines.get(i).trim());
                 violationsFound = true;
             }
@@ -152,9 +153,12 @@ public class CodeCleanupMojo extends AbstractMojo {
         var bytes = readAllBytes(file);
         if (bytes.length == 0) return false;
 
-        // Check if last byte is newline (LF or CR)
         var lastByte = bytes[bytes.length - 1];
-        return lastByte == '\n' || lastByte == '\r';
+        var hasNewline = lastByte == '\n' || lastByte == '\r';
+        if (!hasNewline)  {
+            getLog().warn("Missing newline at end of file: " + file);
+        }
+        return hasNewline;
     }
 
     private boolean hasUnusedImports(Path path) {
@@ -187,9 +191,8 @@ public class CodeCleanupMojo extends AbstractMojo {
 
                 @Override
                 public void visit(CatchClause catchClause, Void arg) {
-                    // Capture exception names in catch blocks
                     var exceptionType = catchClause.getParameter().getType().asString();
-                    usedNames.add(exceptionType);  // Mark the exception as used
+                    usedNames.add(exceptionType);
                     super.visit(catchClause, arg);
                 }
             }, null);
